@@ -11,13 +11,19 @@ distributed one-to-one messaging using [Rhizome][] as transport.
 The [Serval DNA][] daemon that runs on every node gives applications access to
 the [MeshMS][] service via the **MeshMS REST API** described in this document.
 
-### Basic concepts
+Basic concepts
+--------------
 
 #### Conversation
 
 TBC
 
 #### Ply
+
+TBC
+
+MeshMS REST API operations
+--------------------------
 
 ### GET /restful/meshms/RECIPIENTSID/conversationlist.json
 

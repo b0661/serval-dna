@@ -13,9 +13,10 @@ Keyring via the **Keyring REST API** described in this document.  Using this
 API, client applications can query, unlock, lock, create, and modify identities
 in the keyring.
 
-### Basic concepts
+Basic concepts
+--------------
 
-#### Serval ID
+### Serval ID
 
 Every identity in the [Serval mesh network][] is represented by its **Serval
 ID**, (usually abbreviated to [SID][], and formerly known as “Subscriber ID”),
@@ -27,7 +28,7 @@ SID is used:
 *  to identify the senders, recipients and authors of [Rhizome bundles][]
 *  to identify the parties in a [MeshMS conversation][]
 
-#### Rhizome Secret
+### Rhizome Secret
 
 The *Rhizome Secret* is a secret key, separate from the [SID](#serval-id)
 secret, that is generated randomly for each new identity, and stored in the
@@ -36,7 +37,7 @@ the [Bundle Secret][] of a bundle into its [manifest][], in the form of the
 [Bundle Key][], thus relieving [Rhizome][] applications of the burden of having
 to store and protect Bundle Secrets themselves.
 
-#### PIN
+### PIN
 
 When an identity is created, it can optionally be given a PIN (passphrase).  If
 the PIN is *empty* then the identity is permanently unlocked (visible).
@@ -50,13 +51,16 @@ identities.
 If a PIN is lost and forgotten, then the identity (identities) it unlocks will
 remain locked and unusable forever.  There is no “master PIN” or back-door.
 
-#### Identity unlocking
+### Identity unlocking
 
 All Keyring API requests can supply a passphrase using the optional **pin**
 parameter, which unlocks all keyring identities protected by that password,
 prior to performing the request.  Serval DNA caches every password it receives
 until the password is revoked using the *lock* request, so once an identity is
 unlocked, it remains visible until explicitly locked.
+
+Keyring REST API operations
+---------------------------
 
 ### GET /restful/keyring/identities.json
 
