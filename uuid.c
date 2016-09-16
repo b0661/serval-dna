@@ -60,7 +60,7 @@ void uuid_set_version(serval_uuid_t *uuid, enum uuid_version version)
   uuid->u.record.time_hi_and_version = htons((ntohs(uuid->u.record.time_hi_and_version) & 0xfff) | version_bits);
 }
 
-int uuid_generate_random(serval_uuid_t *uuid)
+int serval_uuid_generate_random(serval_uuid_t *uuid)
 {
   randombytes_buf(uuid->u.binary, sizeof uuid->u.binary);
   // The following discards 6 random bits.
