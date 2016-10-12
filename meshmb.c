@@ -1,13 +1,282 @@
 #include "serval.h"
 #include "serval_types.h"
 #include "dataformats.h"
-#include "cli.h"
 #include "log.h"
 #include "debug.h"
-#include "instance.h"
 #include "conf.h"
-#include "commandline.h"
 #include "overlay_buffer.h"
+#include "keyring.h"
+#include "crypto.h"
+#include "mem.h"
+#include "meshmb.h"
+
+struct feed_metadata{
+  unsigned tree_depth;
+  struct message_ply ply; // (ply starts with a rhizome_bid_t, so this is consistent with a nibble tree)
+  const char *name;
+  // what is the offset of their last message
+  uint64_t last_message;
+  // what is the last message we processed?
+  uint64_t last_seen;
+  // our cached value for the last known size of their ply
+  uint64_t size;
+};
+
+struct meshmb_feeds{
+  struct tree_root root;
+  keyring_identity *id;
+};
+
+#define MAX_NAME_LEN (256)  // ??
+
+static void update_stats(struct feed_metadata *metadata, struct message_ply_read *reader)
+{
+  if (!metadata->ply.found){
+    // get the current size from the db
+    if (sqlite_exec_uint64(&metadata->ply.size,
+      "SELECT filesize FROM manifests WHERE id = ?",
+      RHIZOME_BID_T, &metadata->ply.bundle_id,
+      END) == 1)
+	metadata->ply.found = 1;
+    else
+      return;
+  }
+
+  if (metadata->size == metadata->ply.size)
+    return;
+
+  if (!message_ply_is_open(reader)
+    && message_ply_read_open(reader, &metadata->ply.bundle_id)!=0)
+    return;
+
+  if (metadata->name)
+    free((void*)metadata->name);
+  metadata->name = reader->name ? str_edup(reader->name) : NULL;
+
+  reader->read.offset = reader->read.length;
+  if (message_ply_find_prev(reader, MESSAGE_BLOCK_TYPE_MESSAGE)==0)
+    metadata->last_message = reader->record_end_offset;
+
+  metadata->size = metadata->ply.size;
+  return;
+}
+
+static int write_metadata(void **record, void *context)
+{
+  struct feed_metadata *metadata = (struct feed_metadata *)*record;
+  struct rhizome_write *write = (struct rhizome_write *)context;
+
+  assert(metadata->size >= metadata->last_message);
+  assert(metadata->size >= metadata->last_seen);
+  {
+    struct message_ply_read reader;
+    bzero(&reader, sizeof(reader));
+    update_stats(metadata, &reader);
+  }
+  unsigned name_len = (metadata->name ? strlen(metadata->name) : 0) + 1;
+  if (name_len > MAX_NAME_LEN)
+    name_len = MAX_NAME_LEN;
+  uint8_t buffer[sizeof (rhizome_bid_t) + 1 + 12*3 + name_len];
+  bcopy(metadata->ply.bundle_id.binary, buffer, sizeof (rhizome_bid_t));
+  size_t len = sizeof (rhizome_bid_t);
+  buffer[len++]=0;// flags?
+  len+=pack_uint(&buffer[len], metadata->size);
+  len+=pack_uint(&buffer[len], metadata->size - metadata->last_message);
+  len+=pack_uint(&buffer[len], metadata->size - metadata->last_seen);
+  if (name_len > 1)
+    strncpy_nul((char *)&buffer[len], metadata->name, name_len);
+  else
+    buffer[len]=0;
+  len+=name_len;
+  assert(len < sizeof buffer);
+  return rhizome_write_buffer(write, buffer, len);
+}
+
+int meshmb_flush(struct meshmb_feeds *feeds)
+{
+
+  rhizome_manifest *m = rhizome_new_manifest();
+  if (!m)
+    return -1;
+
+  int ret =-1;
+  sign_keypair_t key;
+  crypto_seed_keypair(&key,
+    "91656c3d62e9fe2678a1a81fabe3f413%s5a37120ca55d911634560e4d4dc1283f",
+    alloca_tohex(feeds->id->sign_keypair->private_key.binary, sizeof feeds->id->sign_keypair->private_key));
+  struct rhizome_bundle_result result = rhizome_private_bundle(m, &key);
+
+  switch(result.status){
+    case RHIZOME_BUNDLE_STATUS_SAME:
+    case RHIZOME_BUNDLE_STATUS_NEW:
+    {
+      struct rhizome_write write;
+      bzero(&write, sizeof(write));
+
+      enum rhizome_payload_status pstatus = rhizome_write_open_manifest(&write, m);
+      if (pstatus==RHIZOME_PAYLOAD_STATUS_NEW){
+	if (tree_walk(&feeds->root, NULL, 0, write_metadata, &write)==0){
+	  pstatus = rhizome_finish_write(&write);
+	  if (pstatus == RHIZOME_PAYLOAD_STATUS_NEW)
+	    ret = 0;
+	}
+      }
+      if (ret!=0)
+	rhizome_fail_write(&write);
+      break;
+    }
+    default:
+      break;
+  }
+
+  rhizome_manifest_free(m);
+  return ret;
+}
+
+static int free_feed(void **record, void *UNUSED(context))
+{
+  struct feed_metadata *f = *record;
+  if (f->name)
+    free((void *)f->name);
+  free(f);
+  *record = NULL;
+  return 0;
+}
+
+void meshmb_close(struct meshmb_feeds *feeds)
+{
+  tree_walk(&feeds->root, NULL, 0, free_feed, NULL);
+  free(feeds);
+}
+
+static void* alloc_feed (void *UNUSED(context), const uint8_t *binary, size_t UNUSED(bin_length))
+{
+  struct feed_metadata *feed = emalloc_zero(sizeof(struct feed_metadata));
+  if (feed)
+    feed->ply.bundle_id = *(rhizome_bid_t *)binary;
+  return feed;
+}
+
+static int read_metadata(struct meshmb_feeds *feeds, struct rhizome_read *read)
+{
+  struct rhizome_read_buffer buff;
+  bzero(&buff, sizeof(buff));
+  uint8_t buffer[sizeof (rhizome_bid_t) + 12*3 + MAX_NAME_LEN];
+
+  uint8_t version=0xFF;
+  if (rhizome_read_buffered(read, &buff, &version, 1)==-1)
+    return -1;
+
+  if (version != 0)
+    return WHYF("Unknown file format version (got 0x%02x)", version);
+
+  while(1){
+    ssize_t bytes = rhizome_read_buffered(read, &buff, buffer, sizeof buffer);
+    if (bytes==0)
+      break;
+
+    uint64_t delta=0;
+    uint64_t size;
+    uint64_t last_message;
+    uint64_t last_seen;
+    int unpacked;
+    const rhizome_bid_t *bid = (const rhizome_bid_t *)&buffer[0];
+    unsigned offset = sizeof(rhizome_bid_t);
+    if (offset >= (unsigned)bytes)
+      return -1;
+    //uint8_t flags = buffer[offset++];
+    offset++;
+    if (offset >= (unsigned)bytes)
+      return -1;
+
+    if ((unpacked = unpack_uint(buffer+offset, bytes-offset, &size)) == -1)
+      return -1;
+    offset += unpacked;
+
+    if ((unpacked = unpack_uint(buffer+offset, bytes-offset, &delta)) == -1)
+      return -1;
+    offset += unpacked;
+    last_message = size - delta;
+
+    if ((unpacked = unpack_uint(buffer+offset, bytes-offset, &delta)) == -1)
+      return -1;
+    offset += unpacked;
+    last_seen = size - delta;
+
+    const char *name = (const char *)&buffer[offset];
+    while(buffer[offset++]){
+      if (offset >= (unsigned)bytes)
+	return -1;
+    }
+
+    read->offset += offset - bytes;
+    struct feed_metadata *result;
+    if (tree_find(&feeds->root, (void**)&result, bid->binary, sizeof *bid, alloc_feed, NULL)<0)
+      return -1;
+
+    result->last_message = last_message;
+    result->last_seen = last_seen;
+    result->size = size;
+    result->name = (name && *name) ? str_edup(name) : NULL;
+  }
+  return 0;
+}
+
+int meshmb_open(keyring_identity *id, struct meshmb_feeds **feeds)
+{
+  int ret = -1;
+
+  *feeds = emalloc_zero(sizeof(struct meshmb_feeds));
+  if (*feeds){
+    (*feeds)->id = id;
+    rhizome_manifest *m = rhizome_new_manifest();
+    if (m){
+      sign_keypair_t key;
+      crypto_seed_keypair(&key,
+	"91656c3d62e9fe2678a1a81fabe3f413%s5a37120ca55d911634560e4d4dc1283f",
+	alloca_tohex(id->sign_keypair->private_key.binary, sizeof id->sign_keypair->private_key));
+      struct rhizome_bundle_result result = rhizome_private_bundle(m, &key);
+      switch(result.status){
+	case RHIZOME_BUNDLE_STATUS_SAME:{
+	  struct rhizome_read read;
+	  bzero(&read, sizeof(read));
+
+	  enum rhizome_payload_status pstatus = rhizome_open_decrypt_read(m, &read);
+	  if (pstatus == RHIZOME_PAYLOAD_STATUS_STORED){
+	    if (read_metadata(*feeds, &read)==-1)
+	      WHYF("Failed to read metadata");
+	    else
+	      ret = 0;
+	  }else
+	    WHYF("Failed to read metadata: %s", rhizome_payload_status_message(pstatus));
+
+	  rhizome_read_close(&read);
+	}break;
+
+	case RHIZOME_BUNDLE_STATUS_NEW:
+	  ret = 0;
+	  break;
+
+	case RHIZOME_BUNDLE_STATUS_BUSY:
+	  break;
+
+	default:
+	  // everything else should be impossible.
+	  FATALF("Cannot create manifest: %s", alloca_rhizome_bundle_result(result));
+      }
+
+      rhizome_bundle_result_free(&result);
+    }
+
+    rhizome_manifest_free(m);
+  }
+
+  if (ret!=0){
+    meshmb_close(*feeds);
+    *feeds=NULL;
+  }
+  return ret;
+}
 
 int meshmb_send(const keyring_identity *id, const char *message, size_t message_len,
   unsigned nassignments, const struct rhizome_manifest_field_assignment *assignments){
@@ -30,184 +299,3 @@ int meshmb_send(const keyring_identity *id, const char *message, size_t message_
 
   return ret;
 }
-
-DEFINE_FEATURE(cli_meshmb);
-
-DEFINE_CMD(app_meshmb_send, 0,
-  "Append a public broadcast message to your feed",
-  "meshmb", "send" KEYRING_PIN_OPTIONS, "<id>", "<message>", "...");
-static int app_meshmb_send(const struct cli_parsed *parsed, struct cli_context *UNUSED(context))
-{
-  const char *idhex, *message;
-  if (cli_arg(parsed, "id", &idhex, str_is_identity, "") == -1
-    || cli_arg(parsed, "message", &message, NULL, "") == -1)
-    return -1;
-
-  unsigned nfields = (parsed->varargi == -1) ? 0 : parsed->argc - (unsigned)parsed->varargi;
-  struct rhizome_manifest_field_assignment fields[nfields];
-
-  if (nfields){
-    if (rhizome_parse_field_assignments(fields, nfields, parsed->args + parsed->varargi)==-1)
-      return -1;
-  }
-
-  identity_t identity;
-  if (str_to_identity_t(&identity, idhex) == -1)
-    return WHY("Invalid identity");
-
-  if (create_serval_instance_dir() == -1)
-    return -1;
-  if (rhizome_opendb() == -1)
-    return -1;
-  assert(keyring == NULL);
-  if (!(keyring = keyring_open_instance_cli(parsed)))
-    return -1;
-
-  keyring_identity *id = keyring_find_identity(keyring, &identity);
-  if (!id)
-    return WHY("Invalid identity");
-
-  return meshmb_send(id, message, strlen(message)+1, nfields, fields);
-}
-
-DEFINE_CMD(app_meshmb_read, 0,
-  "Read a broadcast message feed.",
-  "meshmb", "read", "<id>");
-static int app_meshmb_read(const struct cli_parsed *parsed, struct cli_context *context)
-{
-  const char *hex_id;
-  if (cli_arg(parsed, "id", &hex_id, str_is_identity, "") == -1)
-    return -1;
-
-  rhizome_bid_t bid;
-  if (str_to_rhizome_bid_t(&bid, hex_id) == -1)
-    return WHY("Invalid Identity");
-
-  /* Ensure the Rhizome database exists and is open */
-  if (create_serval_instance_dir() == -1)
-    return -1;
-  if (rhizome_opendb() == -1)
-    return -1;
-
-  struct message_ply_read read;
-  bzero(&read, sizeof read);
-
-  if (message_ply_read_open(&read, &bid)==-1)
-    return -1;
-
-  int ret=0;
-  size_t row_id = 0;
-  const char *names[]={
-    "_id","offset","age","message"
-  };
-  cli_start_table(context, NELS(names), names);
-  time_s_t timestamp = 0;
-  time_s_t now = gettime();
-
-  while(message_ply_read_prev(&read)==0){
-    switch(read.type){
-      case MESSAGE_BLOCK_TYPE_TIME:
-	if (read.record_length<4){
-	  WARN("Malformed ply, expected 4 byte timestamp");
-	  continue;
-	}
-	timestamp = read_uint32(read.record);
-	break;
-
-      case MESSAGE_BLOCK_TYPE_MESSAGE:
-	cli_put_long(context, row_id++, ":");
-	cli_put_long(context, read.record_end_offset, ":");
-	cli_put_long(context, timestamp ? (long)(now - timestamp) : (long)-1, ":");
-	cli_put_string(context, (const char *)read.record, "\n");
-
-	break;
-
-      case MESSAGE_BLOCK_TYPE_ACK:
-	// TODO, link to some other ply?
-	break;
-
-      default:
-	//ignore unknown types
-	break;
-    }
-  }
-  cli_end_table(context, row_id);
-
-  message_ply_read_close(&read);
-  return ret;
-}
-
-DEFINE_CMD(app_meshmb_find, 0,
-  "Browse available broadcast message feeds",
-  "meshmb", "find", "[<search>]");
-static int app_meshmb_find(const struct cli_parsed *parsed, struct cli_context *context)
-{
-  const char *search=NULL;
-  cli_arg(parsed, "search", &search, NULL, "");
-  // Ensure the Rhizome database exists and is open
-  if (create_serval_instance_dir() == -1)
-    return -1;
-  if (rhizome_opendb() == -1)
-    return -1;
-
-  struct rhizome_list_cursor cursor;
-  bzero(&cursor, sizeof cursor);
-  cursor.service = RHIZOME_SERVICE_MESHMB;
-  cursor.name = search && search[0] ? search : NULL;
-
-  //TODO hide feeds that have been blocked
-
-  if (rhizome_list_open(&cursor) == -1)
-    return -1;
-
-  const char *names[]={
-    "_id",
-    "id",
-    "version",
-    "date",
-    "name"
-  };
-  cli_start_table(context, NELS(names), names);
-
-  unsigned rowcount=0;
-  int n;
-
-  while ((n = rhizome_list_next(&cursor)) == 1) {
-    rowcount++;
-    rhizome_manifest *m = cursor.manifest;
-    cli_put_long(context, m->rowid, ":");
-    cli_put_hexvalue(context, m->keypair.public_key.binary, sizeof m->keypair.public_key.binary, ":");
-    cli_put_long(context, m->version, ":");
-    cli_put_long(context, m->has_date ? m->date : 0, ":");
-    cli_put_string(context, m->name, "\n");
-  }
-  rhizome_list_release(&cursor);
-  cli_end_table(context, rowcount);
-  return 0;
-}
-
-/*
-DEFINE_CMD(app_meshmb_follow, 0,
-  "",
-  "meshmb", "follow|ignore|block" KEYRING_PIN_OPTIONS, "<id>", "<peer>");
-static int app_meshmb_follow(const struct cli_parsed *parsed, struct cli_context *context)
-{
-  return 0;
-}
-
-DEFINE_CMD(app_meshmb_list, 0,
-  "",
-  "meshmb", "list", "following|blocked" KEYRING_PIN_OPTIONS, "--last-message", "<id>");
-static int app_meshmb_list(const struct cli_parsed *parsed, struct cli_context *context)
-{
-  return 0;
-}
-
-DEFINE_CMD(app_meshmb_news, 0,
-  "",
-  "meshmb", "news" KEYRING_PIN_OPTIONS, "<sid>");
-static int app_meshmb_news(const struct cli_parsed *parsed, struct cli_context *context)
-{
-  return 0;
-}
-*/
