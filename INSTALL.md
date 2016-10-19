@@ -60,6 +60,7 @@ compiled from source.  The [Notes for Developers][] give more details.
 Optional:
 
  * Java compiler and SDK
+ * [Swift] 3 compiler
  * ALSA sound library and headers (present on Linux, not on Android)
 
 Test dependencies:
@@ -74,11 +75,15 @@ Test dependencies:
 OS-X using the [homebrew][] package manager.  The [Notes for Developers][] give
 more details.
 
-Build
------
+Native Build
+------------
 
-To compile a native (ie, not cross-compiled) Serval DNA from source, run the
-following commands:
+A *native build* of Serval DNA will produce libraries and executable programs
+that can be run on the same platform on which the build is performed.  This is
+useful for development and testing.
+
+The following commands will compile a native (ie, not cross-compiled) Serval
+DNA from source:
 
     $ cd $HOME/src/serval-dna
     $ autoreconf -f -i -I m4
@@ -110,15 +115,15 @@ A successful session should appear something like:
     CC commandline.c
     ...
     LINK simulator
-    SERVALD CC test_cli.c
-    SERVALD CC log_context.c
-    SERVALD CC log_stderr.c
-    SERVALD CC context1.c
+    AR libservaldaemon.a
+    LINK servald
+    LINK libservaldaemon.so
     LINK serval-tests
     $
 
-On Solaris, the system `make` command may not be GNU Make, and the system
-`cc` command may not be GNU Gcc.  The following may work:
+On Solaris and other proprietary platforms, the `make` command may not be GNU
+Make, and the `cc` command may not be the GNU C compiler.  The following may
+work:
 
     $ cd $HOME/src/serval-dna
     $ autoreconf -f -i -I m4
@@ -134,19 +139,29 @@ In the event of a build failure:
  * consult the [Notes for Developers][]
  * as a last resort, [contact the Serval Project][]
 
+Android build
+-------------
+
+The [batphone][] app for Android builds Serval DNA from source by including
+[Android.mk](./Android.mk) in its own build process; see the [batphone build
+instructions][] for more information.
+
+It is not necessary to perform a [native build](#native-build) before or after
+an Android build; the two produce completely unrelated artifacts.
+
 Built artifacts
 ---------------
 
-The build process produces the following artifacts:
+The [native build](#native-build) process produces the following artifacts:
 
 * **servald** is the main Serval DNA daemon executable.  All the Serval DNA
   daemon code is statically linked into this executable, so it does not depend
   on any built Serval libraries.  However, it is dynamically linked with the
-  system libraries and with `libsodium.so`.
+  system libraries and with *libsodium*.
 
 * **servaldwrap** is a Serval DNA executable identical to *servald*, but
-  dynamically linked with `libservald.so` instead of statically linked.  This
-  executable mainly exists to ensure that the shared library is always
+  dynamically linked with `libservaldaemon.so` instead of statically linked.
+  This executable mainly exists to ensure that the shared library is always
   linkable.
 
 * **serval-tests** is an executable utility that performs various system tests
@@ -155,19 +170,19 @@ The build process produces the following artifacts:
   provided in a separate executable in order to keep the size of the *servald*
   executable to a minimum.
 
-* **libservald.a** is a static library containing the complete executable code
-  of the Serval DNA daemon.  An executable (such as *servald*) can be built
-  with any desired subset of Serval functions by linking in only the required
-  parts of this library using the *features* mechanism described in
-  [feature.h](./feature.h).
-
-* **libservald.so** is a dynamic library containing the complete executable
-  code of the Serval DNA daemon, including [JNI][] entry points.  The Serval
-  DNA Java API, which is used by [batphone][], and the *servaldwrap* executable
-  both use this dynamic library.
-
 * **directory_service** is the executable for the [Serval Infrastructure][]
   daemon.
+
+* **libservaldaemon.a** is a static library containing the complete executable
+  code of the Serval DNA daemon, including the [JNI][] and [Swift][] APIs.  An
+  executable (such as *servald*) can be built with any desired subset of Serval
+  functions by linking in only the required parts of this library using the
+  *features* mechanism described in [feature.h](./feature.h).
+
+* **libservaldaemon.so** is a dynamic library containing the complete
+  executable code of the Serval DNA daemon, including the [JNI][] and [Swift][]
+  APIs.  The native *servaldwrap* executable uses this dynamic library.  The
+  [Android build](#android-build) produces its own version of this library.
 
 * **libservalclient.a** and **libservalclient.so** are static and dynamic
   libraries implementing the client end of the interface with the servald
@@ -251,6 +266,7 @@ This document is available under the [Creative Commons Attribution 4.0 Internati
 [Serval DNA]: ./README.md
 [serval-dna]: https://github.com/servalproject/serval-dna
 [batphone]: https://github.com/servalproject/batphone
+[batphone build instructions]: https://github.com/servalproject/batphone/blob/development/INSTALL.md
 [Android 2.2 “Froyo”]: http://developer.android.com/about/versions/android-2.2-highlights.html
 [Android NDK]: http://developer.android.com/tools/sdk/ndk/index.html
 [Xcode]: https://developer.apple.com/xcode/
@@ -269,6 +285,7 @@ This document is available under the [Creative Commons Attribution 4.0 Internati
 [MDP API]: ./doc/Mesh-Datagram-Protocol.md#mdp-api
 [CLI API]: ./doc/CLI-API.md
 [JNI]: http://en.wikipedia.org/wiki/Java_Native_Interface
+[Swift]: https://en.wikipedia.org/wiki/Swift_(programming_language)
 [Bash]: http://en.wikipedia.org/wiki/Bash_(Unix_shell)
 [GNU make]: http://www.gnu.org/software/make/
 [Git]: http://git-scm.com/

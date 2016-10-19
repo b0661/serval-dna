@@ -91,6 +91,7 @@ if test -n "$JAVAC"; then
 fi
 
 dnl Check for a working Swift 3 compiler, keep going if unsuccessful.
+SWIFTCFLAGS=
 AC_PROG_SWIFTC
 if test -n "$SWIFTC"; then
     AC_PROG_SWIFTC_IS_SWIFT3
@@ -99,6 +100,7 @@ if test -n "$SWIFTC"; then
     fi
 fi
 AC_SUBST([SWIFTC])
+AC_SUBST([SWIFTCFLAGS])
 
 dnl XXX Isn't this pointless? we are always linked against libc
 AC_CHECK_LIB(c,srandomdev)

@@ -42,6 +42,15 @@ SERVAL_DAEMON_OBJS += $(SERVAL_DAEMON_JNI_OBJS)
 
 endif
 
+ifneq ($(SWIFTC),)
+
+SERVAL_DAEMON_SWIFT_OBJS = \
+	$(addprefix $(OBJSDIR_SERVALD)/, $(SERVAL_DAEMON_SWIFT_SOURCES:.swift=.o))
+
+SERVAL_DAEMON_OBJS += $(SERVAL_DAEMON_SWIFT_OBJS)
+
+endif
+
 SQLITE3_OBJS = \
 	$(addprefix $(OBJSDIR_SERVALD)/, $(notdir $(SQLITE3_SOURCES:.c=.o)))
 
@@ -85,6 +94,12 @@ CFLAGS+=-DSHA2_USE_INTTYPES_H -D_XOPEN_SOURCE=600 -D_XOPEN_SOURCE_EXTENDED=1 -D_
 CFLAGS+=-D_DARWIN_C_SOURCE
 CFLAGS_SQLITE= @CFLAGS_SQLITE@
 
+SWIFTC= 		@SWIFTC@
+SWIFTCFLAGS= 		@SWIFTCFLAGS@
+SWIFTCFLAGS+=		-I $(SOURCE_PREFIX).
+SWIFTLIBS=		@LIBS@
+SWIFT_MODULE_NAME=	servald
+
 INSTALL=        install
 INSTALL_PROGRAM=$(INSTALL)
 INSTALL_DATA=   $(INSTALL) -m 644
@@ -96,17 +111,20 @@ CFLAGS+=-Wextra
 # Security enhancements from Debian
 CFLAGS+=-Wformat -Werror=format-security -D_FORTIFY_SOURCE=2
 
-DEFS=	@DEFS@
+DEFS=		@DEFS@
+SWIFTDEFS=	$(addprefix -Xcc , $(DEFS))
 
 .PHONY: all libs test install uninstall clean
 
-all:	libs servald servaldwrap test
+all:	libs servald directory_service test
 
-libs:	libservaldaemon.so \
+libs:	libservaldaemon.so libservaldaemon.a \
 	libservalclient.so libservalclient.a \
 	libmonitorclient.so libmonitorclient.a
 
-test:   tfw_createfile directory_service fakeradio simulator serval-tests
+test:   servaldwrap serval-tests \
+	fakeradio simulator \
+	tfw_createfile
 
 install: servald
 	$(INSTALL_PROGRAM) -D servald $(DESTDIR)$(sbindir)/servald
@@ -115,12 +133,25 @@ uninstall:
 	$(RM) $(DESTDIR)$(sbindir)/servald
 
 clean:
-	@$(RM) -r $(OBJSDIRS:%=%/*) \
-		  servald \
-		  libservaldaemon.so libservaldaemon.a \
-		  libservalclient.so libservalclient.a \
-		  libmonitorclient.so libmonitorclient.a \
-		  tfw_createfile directory_service fakeradio simulator serval-tests
+	@$(RM) -r $(OBJSDIRS:%=%/*)
+	@$(RM)	servald \
+		libservaldaemon.so libservaldaemon.a \
+		libservalclient.so libservalclient.a \
+		libmonitorclient.so libmonitorclient.a \
+		tfw_createfile directory_service fakeradio simulator serval-tests \
+		$(SWIFT_MODULE_NAME).swiftmodule \
+		$(SWIFT_MODULE_NAME).swiftdoc
+
+# Only provide Swift targets if the Swift compiler is available.
+ifneq ($(SWIFTC),)
+
+all:	swiftmodule
+
+test:	servaldswift
+
+swiftmodule:	$(SWIFT_MODULE_NAME).swiftmodule
+
+endif # SWIFTC
 
 # Source code test coverage support -- see doc/Testing.md
 
@@ -225,6 +256,20 @@ $(OBJSDIR_LIB)/%.o: $(SOURCE_PREFIX)%.c
 	@$(RM) $(@:.o=.gcno) $(@:.o=.gcda)
 	@$(CC) $(CFLAGS) $(DEFS) -c $< -o $@
 
+ifneq ($(SWIFTC),)
+
+$(OBJSDIR_SERVALD)/%.o: $(SOURCE_PREFIX)%.swift
+	@echo SERVALD SWIFT $<
+	@mkdir -p $(dir $@)
+	@$(RM) $@
+	@$(SWIFTC) -emit-library -emit-object -module-name $(SWIFT_MODULE_NAME) $(SWIFTCFLAGS) $(SWIFTDEFS) $< -o $@
+
+$(SWIFT_MODULE_NAME).swiftmodule: $(SERVAL_DAEMON_SWIFT_SOURCES)
+	@echo SWIFT MODULE $@
+	@$(SWIFTC) -emit-module -module-name $(@:.swiftmodule=) $(SWIFTCFLAGS) $(SWIFTDEFS) $^
+
+endif # SWIFTC
+
 # Dependencies on header files.  The following list of dependencies is too
 # broad so it sometimes results in unnecessary re-compilation, but that is
 # better than too narrow, which can result in missed re-compilation.
@@ -239,6 +284,10 @@ $(SIMULATOR_OBJS):			Makefile $(SOURCE_PREFIX)config.h $(PREFIXED_HEADERS)
 
 # Rules for main targets.
 
+# The default GNU linker (BFD) cannot relocate some symbols produced by the
+# Swift compiler, the gold linker is used to create dynamic libraries.  See
+# doc/Development.md for details.
+
 libservaldaemon.a: \
 		$(SERVALD_OBJS) \
 		$(OBJSDIR_TOOLS)/version.o
@@ -248,9 +297,10 @@ libservaldaemon.a: \
 libservaldaemon.so: \
 		$(OBJSDIR_SERVALD)/servald_features.o \
 		$(SERVAL_DAEMON_JNI_OBJS) \
+		$(SERVAL_DAEMON_SWIFT_OBJS) \
 		libservaldaemon.a
 	@echo LINK $@
-	@$(CC) -Wall -shared -o $@ $^ $(LDFLAGS)
+	@$(CC) -Wall -shared -fuse-ld=gold -o $@ $^ $(LDFLAGS)
 
 servald: $(OBJSDIR_SERVALD)/servald_features.o libservaldaemon.a
 	@echo LINK $@
@@ -280,13 +330,21 @@ simulator: $(SIMULATOR_OBJS) libservalclient.a
 	@echo LINK $@
 	@$(CC) -Wall -o $@ $^ $(LDFLAGS)
 
+ifneq ($(SWIFTC),)
+
+servaldswift: $(SOURCE_PREFIX)swift_servald.swift $(OBJSDIR_SERVALD)/servald_features.o libservaldaemon.a
+	@echo SWIFT $@
+	@$(SWIFTC) -emit-executable $(SWIFTCFLAGS) $(SWIFTDEFS) -o $@ $^ $(SWIFTLIBS)
+
+endif # SWIFTC
+
 libservalclient.a: $(LIB_SERVAL_OBJS) $(OBJSDIR_TOOLS)/version.o
 	@echo AR $@
 	@$(AR) -cr $@ $^
 
 libservalclient.so: $(LIB_SERVAL_OBJS) $(OBJSDIR_TOOLS)/version.o
 	@echo LINK $@
-	@$(CC) -Wall -shared -o $@ $^ $(LDFLAGS)
+	@$(CC) -Wall -shared -fuse-ld=gold -o $@ $^ $(LDFLAGS)
 
 libmonitorclient.a: $(MONITOR_CLIENT_OBJS) $(OBJSDIR_TOOLS)/version.o
 	@echo AR $@
@@ -294,7 +352,7 @@ libmonitorclient.a: $(MONITOR_CLIENT_OBJS) $(OBJSDIR_TOOLS)/version.o
 
 libmonitorclient.so: $(MONITOR_CLIENT_OBJS) $(OBJSDIR_TOOLS)/version.o
 	@echo LINK $@
-	@$(CC) -Wall -shared -o $@ $^ $(LDFLAGS)
+	@$(CC) -Wall -shared -fuse-ld=gold -o $@ $^ $(LDFLAGS)
 
 # Helpful target to update the COPYRIGHT.txt file by harvesting copyright
 # information from the contents of all the source and header files.  This
