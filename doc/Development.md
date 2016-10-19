@@ -251,6 +251,27 @@ using the [homebrew][] package manager:
     /usr/local/Cellar/jq/1.5_2: 18 files, 958K
     $
 
+Java
+----
+
+The Serval DNA *libservaldeamon* static and dynamic libraries provide a [JNI][]
+API so that the Serval [command line][CLI] can be called from Java programs,
+and the daemon server can be run in a Java thread.
+
+Swift
+-----
+
+The Serval DNA *libservaldaemon* static and dynamic libraries provide a
+[Swift][] API so that the Serval [command line][CLI] can be called from Swift 3
+programs, and the daemon server can be run in a Swift thread.
+
+The default GNU linker (based on the BFD library) does not support relocation
+of some symbols produced by the Swift compiler, so the Serval DNA dynamic
+library is linked using the GNU [gold][] linker instead (available in GNU
+binutils since 2008).  The following error message is from the BFD linker:
+
+    relocation R_X86_64_PC32 against protected symbol `_Tv7servald14log_level_warnVs5Int32' can not be used when making a shared object
+
 About the examples
 ------------------
 
@@ -297,4 +318,7 @@ Available under the [Creative Commons Attribution 4.0 International licence][CC 
 [OS X awk(1)]: https://developer.apple.com/library/mac/documentation/Darwin/Reference/ManPages/man1/awk.1.html
 [jq(1)]: https://stedolan.github.io/jq/
 [homebrew]: http://brew.sh/
+[JNI]: http://en.wikipedia.org/wiki/Java_Native_Interface
+[Swift]: https://en.wikipedia.org/wiki/Swift_(programming_language)
+[gold]: https://en.wikipedia.org/wiki/Gold_(linker)
 [Bourne shell]: http://en.wikipedia.org/wiki/Bourne_shell

@@ -53,7 +53,12 @@ AS_IF([test "x$RHIZOME_STORE_PATH" != x], [AC_DEFINE_UNQUOTED([RHIZOME_STORE_PAT
 dnl Check for programs.
 AC_PROG_CC
 
-dnl Check for compiler options
+dnl The default GNU linker (BFD) cannot relocate some symbols produced by the
+dnl Swift compiler, so the gold linker is used to create dynamic libraries.
+dnl See doc/Development.md for details.
+AX_APPEND_LINK_FLAGS(-fuse-ld=gold)
+
+dnl Check compiler options for compiling SQLite.
 AX_APPEND_COMPILE_FLAGS(
     -Wno-empty-body \
     -Wno-unused-value \
@@ -91,6 +96,7 @@ if test -n "$JAVAC"; then
 fi
 
 dnl Check for a working Swift 3 compiler, keep going if unsuccessful.
+SWIFTCFLAGS=
 AC_PROG_SWIFTC
 if test -n "$SWIFTC"; then
     AC_PROG_SWIFTC_IS_SWIFT3
@@ -99,6 +105,7 @@ if test -n "$SWIFTC"; then
     fi
 fi
 AC_SUBST([SWIFTC])
+AC_SUBST([SWIFTCFLAGS])
 
 dnl XXX Isn't this pointless? we are always linked against libc
 AC_CHECK_LIB(c,srandomdev)
