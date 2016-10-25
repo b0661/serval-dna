@@ -96,7 +96,6 @@ if test -n "$JAVAC"; then
 fi
 
 dnl Check for a working Swift 3 compiler, keep going if unsuccessful.
-SWIFTCFLAGS=
 AC_PROG_SWIFTC
 if test -n "$SWIFTC"; then
     AC_PROG_SWIFTC_IS_SWIFT3
@@ -106,6 +105,14 @@ if test -n "$SWIFTC"; then
 fi
 AC_SUBST([SWIFTC])
 AC_SUBST([SWIFTCFLAGS])
+dnl Check the Swift 3 compiler's default target.
+if test -n "$SWIFTC"; then
+    AC_PROG_SWIFTC_DEFAULT_TARGET
+fi
+
+dnl Check for a working Swift 3 package manager, keep going if unsuccessful.
+AC_PROG_SWIFT_PACKAGE_MANAGER
+AC_SUBST([SWIFT_BUILD])
 
 dnl XXX Isn't this pointless? we are always linked against libc
 AC_CHECK_LIB(c,srandomdev)
@@ -265,4 +272,5 @@ AC_OUTPUT([
     Makefile
     testconfig.sh
     java-api/Makefile
+    swift3-api/Makefile
 ])

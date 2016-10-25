@@ -8,7 +8,8 @@
 #
 #   AX_PROG_SWIFTC_IS_SWIFT3 tests whether the Swift compiler in the SWIFTC
 #   variable (eg, as detected by the AX_PROG_SWIFTC macro) can compile a Swift
-#   3 program to a working native executable.
+#   3 program to a working native executable, with the given SWIFTCFLAGS
+#   compiler options.
 #
 # LICENSE
 #
@@ -42,28 +43,29 @@
 
 AU_ALIAS([AC_PROG_SWIFTC_IS_SWIFT3], [AX_PROG_SWIFTC_IS_SWIFT3])
 AC_DEFUN([AX_PROG_SWIFTC_IS_SWIFT3],[
+    AC_REQUIRE([AX_TMPDIR_SWIFT])
     AC_CACHE_CHECK([if $SWIFTC supports Swift 3], ac_cv_prog_swiftc_is_swift3, [
-        cat <<EOF >Test.swift
+        cat <<EOF > "$ax_tmpdir_swift/Test.swift"
 /* Swift 2 uses Process.arguments, so this only compiles in Swift 3 */
 print(CommandLine.arguments)
 EOF
-        if AC_TRY_COMMAND($SWIFTC $SWIFTCFLAGS -emit-executable -o Test Test.swift) >/dev/null 2>&1; then
-            if AC_TRY_COMMAND(./Test one two three) >Test.out 2>&1; then
-                ac_swift_test_out=`cat Test.out`
-                if test "x$ac_swift_test_out" = ['x["./Test", "one", "two", "three"]']; then
+        if AC_TRY_COMMAND($SWIFTC $SWIFTCFLAGS -emit-executable -o "$ax_tmpdir_swift/Test" "$ax_tmpdir_swift/Test.swift") >/dev/null 2>&1; then
+            if AC_TRY_COMMAND("$ax_tmpdir_swift/Test" one two three) > "$ax_tmpdir_swift/Test.out" 2>&1; then
+                ac_swift_test_out=`cat "$ax_tmpdir_swift/Test.out"`
+                if test "x$ac_swift_test_out" = ['x["'"$ax_tmpdir_swift"'/Test", "one", "two", "three"]']; then
                     ac_cv_prog_swiftc_is_swift3=yes
                 else
                     echo "incorrect output was: $ac_swift_test_out" >&AS_MESSAGE_LOG_FD
                     ac_cv_prog_swiftc_is_swift3=no
                 fi
             else
-                echo "failed ./Test execution gave:" >&AS_MESSAGE_LOG_FD
-                cat Test.out >&AS_MESSAGE_LOG_FD
+                echo "failed "$ax_tmpdir_swift/Test" execution produced output:" >&AS_MESSAGE_LOG_FD
+                cat "$ax_mpdir_swift/Test.out" >&AS_MESSAGE_LOG_FD
                 ac_cv_prog_swiftc_is_swift3=no
             fi
         else
-            echo "failed program was:" >&AS_MESSAGE_LOG_FD
-            cat Test.swift >&AS_MESSAGE_LOG_FD
+            echo "compilation failed for:" >&AS_MESSAGE_LOG_FD
+            cat "$ax_tmpdir_swift/Test.swift" >&AS_MESSAGE_LOG_FD
             ac_cv_prog_swiftc_is_swift3=no
         fi
         rm -f Test.swift Test Test.out

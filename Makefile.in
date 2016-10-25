@@ -1,4 +1,4 @@
-# Makefile.in for Serval DNA
+# Makefile.in for Serval DNA daemon and libraries
 # vim: noet ts=8 sts=0 sw=8
 prefix=@prefix@
 exec_prefix=@exec_prefix@
@@ -174,13 +174,30 @@ endif # $(JAVAC)
 # Only provide Swift targets if the Swift compiler is available.
 ifneq ($(SWIFTC),)
 
-all:	swiftmodule
+all:	swiftmodule swift-api
 
 test:	servaldswift
 
+clean:	swift-api-clean
+
+.PHONY: swiftmodule swift-api swift-api-clean
+
+ifneq ($(SOURCE_PREFIX:/%=),)
+SOURCE_PREFIX_SWIFT3_API=	$(SOURCE_PREFIX)../swift3-api/
+else
+SOURCE_PREFIX_SWIFT3_API=	$(SOURCE_PREFIX)
+endif
+
 swiftmodule:	$(SWIFT_MODULE_NAME).swiftmodule
 
-endif # SWIFTC
+swift-api:
+	@mkdir -p swift3-api
+	cd swift3-api && $(MAKE) SOURCE_PREFIX=$(SOURCE_PREFIX_SWIFT3_API) all
+
+swift-api-clean:
+	cd swift3-api 2>/dev/null && $(MAKE) SOURCE_PREFIX=$(SOURCE_PREFIX_SWIFT3_API) clean
+
+endif # $(SWIFTC)
 
 # Source code test coverage support -- see doc/Testing.md
 
