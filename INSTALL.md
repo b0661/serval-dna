@@ -10,17 +10,24 @@ These instructions will build [Serval DNA][] successfully for the following plat
  * Debian Linux, ix86 and x86\_64, kernel versions 2.6 to 4.6, using [gcc
    4.4][] and later, [gcc 5][] and [gcc 6][]
  * Mac OS-X x86\_64, releases 10.7 “Lion” to 10.11 “El Capitan”, using
-   [Xcode][] versions 3.2 to 8, and GNU tools available from [homebrew][]
+   [Xcode][] versions 3.2 to 8, supplemented by [homebrew][]
  * Oracle SunOs 5.10 (Solaris), Sparc, using [gcc 4.4][] and GNU tools
    installed
 
-[Serval DNA][] also runs on the following platforms, to which these build
-instructions do not apply:
+[Serval DNA][] also builds and runs on the following platforms, for which there
+are separate build instructions:
 
- * [Android 2.2 “Froyo”][], Arm, Linux kernels 2.6.x and 3.x, using [gcc 4.4][]
-   supplied as part of [Android NDK][] Revision 7b
- * [OpenWRT][] (as used by the [Serval Mesh Extender][], the [Mesh Potato][],
-   and the [Commotion Wireless][] project)
+ * [Serval Mesh app for Android][batphone] includes instructions for building
+   Serval DNA as part of an app for [Android 2.2 “Froyo”][] and later versions;
+   Linux kernels 2.6.x and 3.x, Arm architecture, using [gcc 4.4][] supplied as
+   part of [Android NDK][] Revision 7b
+
+ * [Serval DNA on iOS][iOS] gives instructions for [Apple iOS][] using
+   [Xcode][] versions 7 to 8, supplemented by [homebrew][]
+
+ * [Serval DNA on OpenWRT][OpenWRT] gives instructions for the embedded router
+   Linux distribution, as used by the [Serval Mesh Extender][], the [Mesh
+   Potato][], and the [Commotion Wireless][] project
 
 Download
 --------
@@ -70,7 +77,7 @@ Test dependencies:
  * jq 1.3 or later
  * curl
 
-**Bash** and **curl** are both provided by the [XCode][] package for Mac OS X.
+**Bash** and **curl** are both provided by the [Xcode][] package for Mac OS X.
 **GNU grep**, **GNU sed**, **GNU awk** and **jq** can all be installed on Mac
 OS-X using the [homebrew][] package manager.  The [Notes for Developers][] give
 more details.
@@ -274,8 +281,10 @@ This document is available under the [Creative Commons Attribution 4.0 Internati
 [gcc 5]: http://gcc.gnu.org/gcc-5/
 [gcc 6]: http://gcc.gnu.org/gcc-6/
 [Notes for Developers]: ./doc/Development.md
-[OpenWRT]: ./doc/OpenWRT.md
 [Serval Infrastructure]: ./doc/Serval-Infrastructure.md
+[OpenWRT]: ./doc/OpenWRT.md
+[iOS]: ./doc/Apple-iOS.md
+[Apple iOS]: https://en.wikipedia.org/wiki/IOS
 [Serval Mesh Extender]: http://developer.servalproject.org/dokuwiki/doku.php?id=content:meshextender:
 [contact the Serval Project]: http://developer.servalproject.org/dokuwiki/doku.php?id=content:contact
 [RFD900]: http://rfdesign.com.au/index.php/rfd900
@@ -291,6 +300,6 @@ This document is available under the [Creative Commons Attribution 4.0 Internati
 [Git]: http://git-scm.com/
 [Subversion]: http://subversion.apache.org/
 [Bourne shell]: http://en.wikipedia.org/wiki/Bourne_shell
-[XCode]: https://developer.apple.com/xcode/
+[Xcode]: https://developer.apple.com/xcode/
 [homebrew]: http://brew.sh/
 [CC BY 4.0]: ./LICENSE-DOCUMENTATION.md
