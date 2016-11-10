@@ -96,19 +96,30 @@ if test -n "$JAVAC"; then
 fi
 
 dnl Check for a working Swift 3 compiler, keep going if unsuccessful.
+dnl If its default target is not suitable, adjust it, then ensure that the
+dnl compiler works for the default or adjusted target.
 AC_PROG_SWIFTC
-if test -n "$SWIFTC"; then
+AS_IF([test -n "$SWIFTC"], [
+    AC_PROG_SWIFTC_DEFAULT_TARGET
+    SWIFTC_TARGET=
+    dnl On MacOS, executables can only be built from a module that was compiled
+    dnl for apple-macosx10.10 or greater.
+    AS_IF([test "x$SWIFTC_DEFAULT_TARGET_OS" = xapple-macosx], [
+       AS_VERSION_COMPARE([$SWIFTC_DEFAULT_TARGET_MAJOR.$SWIFTC_DEFAULT_TARGET_MINOR], [10.10], [
+          SWIFTC_TARGET=$SWIFTC_DEFAULT_TARGET_ARCH-${SWIFTC_DEFAULT_TARGET_OS}10.10
+          AC_MSG_WARN([$SWIFTC default target is too old; using $SWIFTC_TARGET])
+       ])
+    ])
+    dnl Prepend any explicit compilation target so that if the user has supplied a
+    dnl -target option in SWIFTCFLAGS, it will still take precedence.
+    AS_IF([test "x$SWIFTC_TARGET" != x], [SWIFTCFLAGS="-target $SWIFTC_TARGET $SWIFTCFLAGS"])
+    dnl Check whether the Swift compiler will compile a simple Swift 3 program with
+    dnl the supplied flags.  If not, then report failure and keep going.
     AC_PROG_SWIFTC_IS_SWIFT3
-    if test "x$ac_cv_prog_swiftc_is_swift3" != xyes; then
-        SWIFTC=
-    fi
-fi
+    AS_IF([test "x$ac_cv_prog_swiftc_is_swift3" != xyes], [SWIFTC=])
+])
 AC_SUBST([SWIFTC])
 AC_SUBST([SWIFTCFLAGS])
-dnl Check the Swift 3 compiler's default target.
-if test -n "$SWIFTC"; then
-    AC_PROG_SWIFTC_DEFAULT_TARGET
-fi
 
 dnl Check for a working Swift 3 package manager, keep going if unsuccessful.
 AC_PROG_SWIFT_PACKAGE_MANAGER
@@ -129,7 +140,7 @@ AC_CHECK_TYPES([off64_t], [have_off64_t=1], [have_off64_t=0])
 AC_CHECK_SIZEOF([off_t])
 
 dnl There must be a 64-bit seek(2) system call of some kind
-AS_IF([test "x$have_lseek64_t" = "xno" -a "x$ac_cv_sizeof_off_t" != x8 ], [
+AS_IF([test "x$have_lseek64_t" = "xno" && test "x$ac_cv_sizeof_off_t" != x8 ], [
     AC_MSG_ERROR([Missing lseek64(2) system call])
 ])
 
